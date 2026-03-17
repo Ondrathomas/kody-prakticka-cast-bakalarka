@@ -109,40 +109,57 @@ outliers = continuity_res[continuity_res['Výpadek [%]'] > 5]
 print(f"Počet objektů s chybovostí nad 5 %: {len(outliers)}")
 
 
-# 5.--- ANALÝZA INTEGRITY A KONTINUITY DAT ---
+# --- 5. ANALÝZA INTEGRITY A KLASIFIKACE DATASETU ---
 
-#  Definice profilů pro filtraci
+#  Definice sledovaných profilů
 cumulative_profiles = ['+E*(m)', '-E*(m)']
 main_profile = '+A15'           # Činný odběr
 reactive_ind_profile = '+Ri15'  # Induktivní jalovina
 reactive_cap_profile = '+Rc15'  # Kapacitní jalovina
+fve_export_profile = '-A15'     # Přetoky do sítě (pro detekci FVE)
 
-#  Separace dat
+#  Separace na kumulativní stavy a pracovní data
 df_cumulative = df_raw[df_raw['profile'].isin(cumulative_profiles)].copy()
 df_work = df_raw[~df_raw['profile'].isin(cumulative_profiles)].copy()
 
-#  Identifikace výroben (FVE) - hledáme přetoky v profilu -A15
-fve_ids = df_work[(df_work['profile'] == '-A15') & (df_work['anonymized_value'] > 0)]['id_numeric'].unique()
+#  Identifikace výroben (FVE)
+fve_ids = df_work[(df_work['profile'] == fve_export_profile) & (df_work['anonymized_value'] > 0)]['id_numeric'].unique()
 
-#  Výpočet statistik pro výpis
+#  Výpočet statistik
 count_total = len(df_raw)
 count_e = len(df_cumulative)
-count_work = len(df_work)
+count_work_total = len(df_work)  # To je těch tvých 23 050 896 řádků
+
+# Detailní rozbor výkonových profilů
 count_a15 = len(df_work[df_work['profile'] == main_profile])
 count_ri15 = len(df_work[df_work['profile'] == reactive_ind_profile])
 count_rc15 = len(df_work[df_work['profile'] == reactive_cap_profile])
+count_fve_export = len(df_work[df_work['profile'] == fve_export_profile])
 
-# FORMÁTOVANÝ VÝPIS
+# Výpočet balastu v rámci pracovních dat
+count_relevant = count_a15 + count_ri15 + count_rc15 + count_fve_export
+count_other = count_work_total - count_relevant
+
+# 5. FORMÁTOVANÝ VÝPIS PRO VS CODE
+print("\n" + "="*65)
 print(f"{'Parametr analýzy (Profil)':<45} | {'Hodnota / Počet':>15}")
 print("-" * 65)
 print(f"{'Celkový počet řádků (surová data)':<45} | {count_total:>15,}")
 print(f"{'Vyfiltrované kumulativní stavy (+E*, -E*)':<45} | {count_e:>15,}")
-print(f"{'Počet řádků pro výkonovou analýzu (celkem)':<45} | {count_work:>15,}")
+print(f"{'Počet řádků pro výkonovou analýzu (celkem)':<45} | {count_work_total:>15,}")
+print("-" * 65)
+print(f"{'Záznamy určené k analýze (podle profilů)':<45} | {count_relevant:>15,}")
 print(f"{'  z toho profil +A15 (Činný odběr)':<45} | {count_a15:>15,}")
 print(f"{'  z toho profil +Ri15 (Induktivní jalovina)':<45} | {count_ri15:>15,}")
 print(f"{'  z toho profil +Rc15 (Kapacitní jalovina)':<45} | {count_rc15:>15,}")
+print(f"{'  z toho profil -A15 (Přetoky FVE)':<45} | {count_fve_export:>15,}")
+print("-" * 65)
+print(f"{'Ostatní nezařazené záznamy':<45} | {count_other:>15,}")
 print("-" * 65)
 print(f"{'Počet objektů typu „Pouze odběr“':<45} | {len(df_work['id_numeric'].unique()) - len(fve_ids):>15}")
 print(f"{'Počet objektů typu „Výrobna (FVE)“':<45} | {len(fve_ids):>15}")
-print(f"{'Identifikátory výroben (detekováno dle -A15)':<45} | {sorted(list(map(int, fve_ids)))}")
+print(f"{'Identifikátory výroben (dle -A15)':<45} | {sorted(list(map(int, fve_ids)))}")
+print("="*65 + "\n")
+
+
 
