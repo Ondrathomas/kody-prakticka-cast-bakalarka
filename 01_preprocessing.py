@@ -18,14 +18,14 @@ from tensorflow.keras.utils import to_categorical
 
 
 
-# -- 2. TRANSFORMACE ČASOVÉ ŘADY A ANALÝZA KVALITY
+# -- 2. TRANSFORMACE ČASOVÉ ŘADY A ANALÝZA KVALITY --
 # Převod v_ts z milisekund na standardní datetime (Korekce časové reprezentace)
 df_raw['datetime'] = pd.to_datetime(df_raw['v_ts'], unit='ms')
 
 # Extrakce roku pro ověření kompletnosti dat v jednotlivých letech
 df_raw['rok'] = df_raw['datetime'].dt.year
 
-# 3. DIAGNOSTIKA DATASETU PŘED PREPROCESSINGEM
+#  3. DIAGNOSTIKA DATASETU PŘED PREPROCESSINGEM 
 print("-" * 30)
 print(f"Celkový počet záznamů v paměti: {len(df_raw):,}")
 
@@ -43,7 +43,7 @@ print("\nUkázka datasetu po úpravě času:")
 print(df_raw[['v_ts', 'datetime', 'id_numeric', 'profile', 'anonymized_value']].head())
 
 
-# 3. ANALÝZA KONTINUITY A IDENTIFIKACE VÝPADKŮ 
+# -- 4. ANALÝZA KONTINUITY A IDENTIFIKACE VÝPADKŮ -- 
 # Definice funkce pro výpočet chybějících 15min intervalů u jednotlivých ID
 def analyze_continuity(input_df):
     print("\n" + "-"*30)
@@ -111,20 +111,20 @@ print(f"Počet objektů s chybovostí nad 5 %: {len(outliers)}")
 
 # 5.--- ANALÝZA INTEGRITY A KONTINUITY DAT ---
 
-# 1. Definice profilů pro filtraci
+#  Definice profilů pro filtraci
 cumulative_profiles = ['+E*(m)', '-E*(m)']
 main_profile = '+A15'           # Činný odběr
 reactive_ind_profile = '+Ri15'  # Induktivní jalovina
 reactive_cap_profile = '+Rc15'  # Kapacitní jalovina
 
-# 2. Separace dat
+#  Separace dat
 df_cumulative = df_raw[df_raw['profile'].isin(cumulative_profiles)].copy()
 df_work = df_raw[~df_raw['profile'].isin(cumulative_profiles)].copy()
 
-# 3. Identifikace výroben (FVE) - hledáme přetoky v profilu -A15
+#  Identifikace výroben (FVE) - hledáme přetoky v profilu -A15
 fve_ids = df_work[(df_work['profile'] == '-A15') & (df_work['anonymized_value'] > 0)]['id_numeric'].unique()
 
-# 4. Výpočet statistik pro výpis
+#  Výpočet statistik pro výpis
 count_total = len(df_raw)
 count_e = len(df_cumulative)
 count_work = len(df_work)
@@ -132,7 +132,7 @@ count_a15 = len(df_work[df_work['profile'] == main_profile])
 count_ri15 = len(df_work[df_work['profile'] == reactive_ind_profile])
 count_rc15 = len(df_work[df_work['profile'] == reactive_cap_profile])
 
-# 5. FORMÁTOVANÝ VÝPIS
+# FORMÁTOVANÝ VÝPIS
 print(f"{'Parametr analýzy (Profil)':<45} | {'Hodnota / Počet':>15}")
 print("-" * 65)
 print(f"{'Celkový počet řádků (surová data)':<45} | {count_total:>15,}")
