@@ -42,15 +42,20 @@ print(df_raw['rok'].value_counts().sort_index())
 print("\nUkázka datasetu po úpravě času:")
 print(df_raw[['v_ts', 'datetime', 'id_numeric', 'profile', 'anonymized_value']].head())
 
-
-# -- 4. ANALÝZA KONTINUITY A IDENTIFIKACE VÝPADKŮ -- 
+# 4. ANALÝZA KONTINUITY A IDENTIFIKACE VÝPADKŮ 
 # Definice funkce pro výpočet chybějících 15min intervalů u jednotlivých ID
 def analyze_continuity(input_df):
-    print("\n" + "-"*30)
-    print("Spouštím podrobnou analýzu kontinuity dat...")
+    print("\n" + "-"*40)
+    print("SPOUŠTÍM PODROBNOU ANALÝZU KONTINUITY DAT...")
+    print("-"*40)
     
     # Filtrujeme profil +A15 (hlavní spotřeba) pro konzistenci analýzy
+    # Pokud v datech profil +A15 nemáš, tento řádek zakomentuj
     df_ana = input_df[input_df['profile'] == '+A15'].copy()
+    
+    # Pokud by byl df_ana prázdný (např. jiný název profilu), použijeme celý df
+    if df_ana.empty:
+        df_ana = input_df.copy()
     
     results = []
     unique_ids = df_ana['id_numeric'].unique()
@@ -59,26 +64,32 @@ def analyze_continuity(input_df):
         # Výběr konkrétního odběrného místa a seřazení podle času
         sub = df_ana[df_ana['id_numeric'] == uid].sort_values('datetime')
         
-        # Výpočet časových mezer mezi řádky v hodinách
+        # Výpočet časových mezer mezi po sobě jdoucími řádky (v hodinách)
+        # diff() spočítá rozdíl mezi řádkem n a n-1
         diffs = sub['datetime'].diff().dt.total_seconds() / 3600
         
-        # Mezera větší než 0.25h (15 min) je považována za výpadek
+        # Mezera větší než 0.25h (15 min) je považována za výpadek v měření
         gaps = diffs[diffs > 0.25]
         
         num_records = len(sub)
         num_gaps = len(gaps)
         max_gap = gaps.max() if not gaps.empty else 0
         
-        # Výpočet teoretické úplnosti (kolik záznamů by tam mělo být od prvního do posledního měření)
-        timespan_h = (sub['datetime'].max() - sub['datetime'].min()).total_seconds() / 3600
+        # Výpočet teoretické úplnosti (kolik záznamů by tam mělo být podle času start-cíl)
+        duration = sub['datetime'].max() - sub['datetime'].min()
+        timespan_h = duration.total_seconds() / 3600
+        
+        # Počet očekávaných 15min intervalů: (hodiny * 4) + 1 (počáteční bod)
         expected = (timespan_h * 4) + 1
         
-        # Výpočet procentuální ztráty dat
-        missing_pct = max(0, (1 - (num_records / expected)) * 100) if expected > 0 else 0
+        # Výpočet procentuální ztráty dat (pokud expected > 0)
+        missing_pct = (1 - (num_records / expected)) * 100 if expected > 0 else 0
+        # Ošetření záporných hodnot (stává se při překryvech/duplicitách)
+        missing_pct = max(0, missing_pct)
             
         results.append({
             'ID': uid,
-            'Počet záznamů': num_records,
+            'Záznamů': num_records,
             'Výpadek [%]': round(missing_pct, 2),
             'Max. mezera [h]': round(max_gap, 2),
             'Počet mezer': num_gaps
@@ -86,27 +97,30 @@ def analyze_continuity(input_df):
 
     return pd.DataFrame(results)
 
-# Provedení analýzy na mém datasetu
+# --- SPUŠTĚNÍ ANALÝZY ---
+# Voláme funkci na datasetu df_raw, který už prošel transformací času
 continuity_res = analyze_continuity(df_raw)
 
-# Seřazení výsledků podle závažnosti výpadků pro identifikaci extrémů
+# Seřazení výsledků podle závažnosti výpadků
 continuity_res = continuity_res.sort_values('Výpadek [%]', ascending=False)
 
-# Výpočet klíčových metrik pro textovou část práce
+# Výpočet statistik pro textovou část BP
 prumerny_vypadek = continuity_res['Výpadek [%]'].mean()
 pocet_budov = len(continuity_res)
 
-# Výpis pro kontrolu ve VS Code a
 print("\n--- STATISTIKA KONTINUITY (Top 10 ID s největšími výpadky) ---")
-print(continuity_res.head(10))
+print(continuity_res.head(10).to_string(index=False))
 
-
+print("-" * 40)
 print(f"Celkový počet analyzovaných objektů: {pocet_budov}")
 print(f"Celková průměrná chybovost v datasetu: {prumerny_vypadek:.2f} %")
 
 # Identifikace ID s výpadkem nad 5 % pro zdůvodnění v textu
 outliers = continuity_res[continuity_res['Výpadek [%]'] > 5]
 print(f"Počet objektů s chybovostí nad 5 %: {len(outliers)}")
+print("-" * 40)
+
+
 
 
 # --- 5. ANALÝZA INTEGRITY A KLASIFIKACE DATASETU ---
