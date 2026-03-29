@@ -1,0 +1,97 @@
+import pandas as pd
+import numpy as np
+
+# =================================================================
+# 1. PŘÍPRAVA A AUTOMATICKÁ DETEKCE SLOUPCŮ
+# =================================================================
+# Podíváme se, jak se jmenuje sloupec s hodnotami ve tvém df_clean
+dostupne_sloupce = df_clean.columns.tolist()
+target_col = None
+
+for col in ['anonymized_value', 'value', 'value_kWh', 'hodnota']:
+    if col in dostupne_sloupce:
+        target_col = col
+        break
+
+if target_col is None:
+    raise ValueError(f"V datech chybí sloupec s hodnotami! Dostupné: {dostupne_sloupce}")
+
+print(f"Používám sloupec: '{target_col}'")
+
+# Filtrace pouze relevantních profilů
+relevantni_profily = ['+A15', '+Ri15', '+Rc15', '-A15']
+df_work = df_clean[df_clean['profile'].isin(relevantni_profily)].copy()
+
+# ================================================================
+# 2. PIVOTACE A FYZIKÁLNÍ VÝPOČTY (Feature Engineering)
+# ================================================================
+print("Zahajuji transformaci dat (Pivotace)...")
+
+df_pivot = df_work.pivot_table(
+    index=['id_numeric', 'v_ts'], 
+    columns='profile', 
+    values=target_col
+).fillna(0).reset_index()
+
+# Kontrola existence všech profilů (pokud některý chybí, doplníme nuly)
+for p in relevantni_profily:
+    if p not in df_pivot.columns:
+        df_pivot[p] = 0.0
+
+print("Počítám fyzikální parametry (Q, S, cos phi)...")
+# Q = jalová složka, S = zdánlivý výkon
+df_pivot['Q_jalovy'] = df_pivot['+Ri15'] - df_pivot['+Rc15']
+df_pivot['S_zdanlivy'] = np.sqrt(df_pivot['+A15']**2 + df_pivot['Q_jalovy']**2)
+
+# Účiník (cos phi) - ošetření dělení nulou
+df_pivot['cos_phi'] = np.where(
+    df_pivot['S_zdanlivy'] > 0, 
+    df_pivot['+A15'] / df_pivot['S_zdanlivy'], 
+    1.0
+)
+
+# Časové rysy pro model (hodina, víkend)
+df_pivot['datetime'] = pd.to_datetime(df_pivot['v_ts'], unit='ms')
+df_pivot['hodina'] = df_pivot['datetime'].dt.hour
+df_pivot['je_vikend'] = df_pivot['datetime'].dt.dayofweek.isin([5, 6]).astype(int)
+
+# =================================================================
+# 3. DIAGNOSTIKA A KATEGORIZACE OBJEKTŮ
+# =================================================================
+print("Kategorizuji 179 budov podle energetického charakteru...")
+
+stats_id = df_pivot.groupby('id_numeric').agg(
+    pocet_mereni=('v_ts', 'count'),
+    typicky_ucinnik=('cos_phi', 'median')
+).reset_index()
+
+# Stanovení prahu pro validní data
+threshold = 2000
+stats_id['Stav'] = np.where(stats_id['pocet_mereni'] >= threshold, 'Vyhovuje', 'Nedostatek dat')
+
+def urci_charakter(row):
+    if row['Stav'] == 'Nedostatek dat': return 'N/A'
+    if row['typicky_ucinnik'] > 0.98: return 'Odporový'
+    if row['typicky_ucinnik'] < 0.85: return 'Indukční'
+    return 'Smíšený'
+
+stats_id['Charakter'] = stats_id.apply(urci_charakter, axis=1)
+
+# =================================================================
+# 4. SUMARIZACE A ULOŽENÍ VÝSLEDKŮ
+# =================================================================
+print("\n" + "="*60)
+print(f"DIAGNOSTIKA DOKONČENA")
+print(f"Celkem unikátních ID: {len(stats_id)}")
+print(f"Celkem datových bodů v matici: {len(df_pivot):,}")
+print("-" * 60)
+print(stats_id['Stav'].value_counts())
+print("-" * 60)
+print("Charakter vyhovujících budov:")
+print(stats_id[stats_id['Stav'] == 'Vyhovuje']['Charakter'].value_counts())
+print("="*60)
+
+# Export pro budoucí práci
+df_pivot.to_csv("Final_Matrix_pro_ML.csv", index=False)
+stats_id.to_csv("Statistika_Budov.csv", index=False)
+print("\nSoubory 'Final_Matrix_pro_ML.csv' a 'Statistika_Budov.csv' byly úspěšně uloženy!")
