@@ -1,1 +1,31 @@
 
+# 1. NAČTENÍ A ZÁKLADNÍ TRANSFORMACE
+# (Předpokládáme, že df_raw již obsahuje data z předchozích kroků)
+
+# Převod Unix timestampu (ms) na standardní datetime
+df_raw['datetime'] = pd.to_datetime(df_raw['v_ts'], unit='ms')
+
+# Extrakce roku pro statistiku
+df_raw['rok'] = df_raw['datetime'].dt.year
+
+# 2. VÝSTUP STATISTIKY (Horní část podle image_02a382.png)
+print("-" * 45)
+print(f"CELKOVÝ POČET SUROVÝCH ZÁZNAMŮ: {len(df_raw):,}".replace(",", " "))
+print("-" * 45)
+
+print("\nRozdělení počtu záznamů podle let:")
+counts_by_year = df_raw['rok'].value_counts().sort_index()
+print(counts_by_year.to_string())
+print(f"Name: count, dtype: int64")
+
+# 3. KONTROLNÍ VÝPIS TRANSFORMACÍ 
+print("\nUkázka datasetu po úpravě času a jednotek:")
+
+# Výběr sloupců pro náhled
+cols_to_show = ['v_ts', 'datetime']
+
+# Nastavení formátu, aby v_ts nebylo ve vědecké notaci
+pd.options.display.float_format = '{:.0f}'.format
+
+# Výpis prvních 5 řádků včetně indexu, jak je vidět na screenshotu
+print(df_raw[cols_to_show].head(5).to_string(index=True))
