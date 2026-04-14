@@ -1,97 +1,71 @@
 import pandas as pd
 import numpy as np
+import gc
 
-# =================================================================
-# 1. PŘÍPRAVA A AUTOMATICKÁ DETEKCE SLOUPCŮ
-# =================================================================
-# Podíváme se, jak se jmenuje sloupec s hodnotami ve tvém df_clean
-dostupne_sloupce = df_clean.columns.tolist()
-target_col = None
+# 1. NASTAVENÍ CEST (Cesta k surovému souboru)
+input_filename = r"C:\Users\ondra\OneDrive\Plocha\cez-data\Prvotni_Dataset_Surovy.csv"
+export_filename = r"C:\Users\ondra\OneDrive\Plocha\Finalni_Export_Data.csv"
 
-for col in ['anonymized_value', 'value', 'value_kWh', 'hodnota']:
-    if col in dostupne_sloupce:
-        target_col = col
-        break
+# 2. NAČTENÍ DAT 
+print("Načítám základní data...")
+profiles_to_keep = ['+A15', '+Ri15', '+Rc15', '-A15']
+df = pd.read_csv(input_filename, usecols=['id_numeric', 'v_ts', 'profile', 'value', 's'])
 
-if target_col is None:
-    raise ValueError(f"V datech chybí sloupec s hodnotami! Dostupné: {dostupne_sloupce}")
+# Filtrace profilů
+df = df[df['profile'].isin(profiles_to_keep)].copy()
 
-print(f"Používám sloupec: '{target_col}'")
+# 3. DEDUPLIKACE U
+print("Provádím deduplikaci (čištění stínů)...")
+status_priority = {32: 0, 8: 1, 2: 2, 128: 3, 16: 4}
+df['priority'] = df['s'].map(status_priority).fillna(99)
 
-# Filtrace pouze relevantních profilů
-relevantni_profily = ['+A15', '+Ri15', '+Rc15', '-A15']
-df_work = df_clean[df_clean['profile'].isin(relevantni_profily)].copy()
+# Seřadíme a odstraníme duplicity
+df = df.sort_values(by=['id_numeric', 'v_ts', 'profile', 'priority'])
+df = df.drop_duplicates(subset=['id_numeric', 'v_ts', 'profile'], keep='first')
 
-# ================================================================
-# 2. PIVOTACE A FYZIKÁLNÍ VÝPOČTY (Feature Engineering)
-# ================================================================
-print("Zahajuji transformaci dat (Pivotace)...")
 
-df_pivot = df_work.pivot_table(
-    index=['id_numeric', 'v_ts'], 
-    columns='profile', 
-    values=target_col
-).fillna(0).reset_index()
+df = df.drop(columns=['priority', 's'])
+gc.collect() 
 
-# Kontrola existence všech profilů (pokud některý chybí, doplníme nuly)
-for p in relevantni_profily:
+# 4. LEHKÁ PIVOTACE
+print("Zahajuji transformaci dat (Efektivní Pivotace)...")
+df_pivot = df.pivot(index=['id_numeric', 'v_ts'], columns='profile', values='value')
+
+# Reset indexu a uvolnění původního df z paměti
+df_pivot = df_pivot.reset_index()
+del df
+gc.collect()
+
+# Doplnění chybějících profilů (např. u budov bez FVE)
+for p in ['+A15', '+Ri15', '+Rc15', '-A15']:
     if p not in df_pivot.columns:
         df_pivot[p] = 0.0
+df_pivot = df_pivot.fillna(0)
 
+# 5. FYZIKÁLNÍ VÝPOČTY
 print("Počítám fyzikální parametry (Q, S, cos phi)...")
-# Q = jalová složka, S = zdánlivý výkon
 df_pivot['Q_jalovy'] = df_pivot['+Ri15'] - df_pivot['+Rc15']
 df_pivot['S_zdanlivy'] = np.sqrt(df_pivot['+A15']**2 + df_pivot['Q_jalovy']**2)
-
-# Účiník (cos phi) - ošetření dělení nulou
 df_pivot['cos_phi'] = np.where(
     df_pivot['S_zdanlivy'] > 0, 
     df_pivot['+A15'] / df_pivot['S_zdanlivy'], 
     1.0
 )
 
-# Časové rysy pro model (hodina, víkend)
+# Časové rysy
 df_pivot['datetime'] = pd.to_datetime(df_pivot['v_ts'], unit='ms')
-df_pivot['hodina'] = df_pivot['datetime'].dt.hour
-df_pivot['je_vikend'] = df_pivot['datetime'].dt.dayofweek.isin([5, 6]).astype(int)
+df_pivot['datum_cas'] = df_pivot['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S')
 
-# =================================================================
-# 3. DIAGNOSTIKA A KATEGORIZACE OBJEKTŮ
-# =================================================================
-print("Kategorizuji 179 budov podle energetického charakteru...")
+# 6. EXPORT
+print("Exportuji finální matici...")
+sloupce_final = [
+    'id_numeric', 'datum_cas', '+A15', '+Rc15', '+Ri15', '-A15', 
+    'cos_phi', 'Q_jalovy', 'v_ts'
+]
 
-stats_id = df_pivot.groupby('id_numeric').agg(
-    pocet_mereni=('v_ts', 'count'),
-    typicky_ucinnik=('cos_phi', 'median')
-).reset_index()
+df_pivot[sloupce_final].to_csv(export_filename, index=False)
 
-# Stanovení prahu pro validní data
-threshold = 2000
-stats_id['Stav'] = np.where(stats_id['pocet_mereni'] >= threshold, 'Vyhovuje', 'Nedostatek dat')
+print("-" * 50)
+print(f"HOTOVO! Data uložena do: {export_filename}")
+print(f"Finální počet řádků: {len(df_pivot):,}")
 
-def urci_charakter(row):
-    if row['Stav'] == 'Nedostatek dat': return 'N/A'
-    if row['typicky_ucinnik'] > 0.98: return 'Odporový'
-    if row['typicky_ucinnik'] < 0.85: return 'Indukční'
-    return 'Smíšený'
-
-stats_id['Charakter'] = stats_id.apply(urci_charakter, axis=1)
-
-# =================================================================
-# 4. SUMARIZACE A ULOŽENÍ VÝSLEDKŮ
-# =================================================================
-print("\n" + "="*60)
-print(f"DIAGNOSTIKA DOKONČENA")
-print(f"Celkem unikátních ID: {len(stats_id)}")
-print(f"Celkem datových bodů v matici: {len(df_pivot):,}")
-print("-" * 60)
-print(stats_id['Stav'].value_counts())
-print("-" * 60)
-print("Charakter vyhovujících budov:")
-print(stats_id[stats_id['Stav'] == 'Vyhovuje']['Charakter'].value_counts())
-print("="*60)
-
-# Export pro budoucí práci
-df_pivot.to_csv("Final_Matrix_pro_ML.csv", index=False)
-stats_id.to_csv("Statistika_Budov.csv", index=False)
-print("\nSoubory 'Final_Matrix_pro_ML.csv' a 'Statistika_Budov.csv' byly úspěšně uloženy!")
